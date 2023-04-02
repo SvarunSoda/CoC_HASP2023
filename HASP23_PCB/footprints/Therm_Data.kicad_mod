@@ -1,0 +1,19 @@
+(footprint "Therm_Data" (version 20211014) (generator pcbnew)
+  (layer "F.Cu")
+  (tedit 0)
+  (attr smd)
+  (fp_text reference "Therm_Data" (at 0 -0.5 unlocked) (layer "F.SilkS") hide
+    (effects (font (size 1 1) (thickness 0.15)))
+    (tstamp 69799cbb-9b21-41b9-aa56-b9069acb946e)
+  )
+  (fp_text value "Therm_Data" (at 0 1 unlocked) (layer "F.Fab") hide
+    (effects (font (size 1 1) (thickness 0.15)))
+    (tstamp 1f266f24-651c-4b42-bf8b-21a1ab7287bc)
+  )
+  (fp_text user "${REFERENCE}" (at 0 2.5 unlocked) (layer "F.Fab") hide
+    (effects (font (size 1 1) (thickness 0.15)))
+    (tstamp 891b35bc-82d5-4c45-9313-8a244f8776e2)
+  )
+  (fp_rect (start 6.35 2.54) (end -2.54 -2.54) (layer "F.SilkS") (width 0.12) (fill none) (tstamp e73726f1-d7ea-432f-81da-c0396a088726))
+  (pad "1" thru_hole circle (at 0 0) (size 2.286 2.286) (drill 1.2) (layers *.Cu *.Mask) (tstamp 8b20e165-4d8c-456f-b03b-f53c978ea36b))
+)
