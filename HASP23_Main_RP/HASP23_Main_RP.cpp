@@ -8,7 +8,7 @@
 #include <string>
 #include <limits>
 #include <stdio.h>
-#include <sys/time.h>//////
+#include <sys/time.h>
 #include <unistd.h>
 #include <time.h>
 #include <cstdlib>
@@ -32,29 +32,29 @@ using std::experimental::filesystem::directory_iterator;
 
 // GLOBAL VARIABLES //
 
-const int GuideLoopRuns = numeric_limits<int>::max();	// How many times the guide loop runs
-const int ScienceLoopRuns = numeric_limits<int>::max();	// How many times the science loop runs
-const uchar LightThreshold = 250;						// (0 - 255) Level above which pixels are considered bright
-const int LightPatchSizeThreshold = 20;					// Total size above which light patches are considered for movement
+const string ProgramPath = "/home/hasp23/Desktop/HASP23_Code_RP/Output/";
+const int LoopRuns = numeric_limits<int>::max();	// How many times the science loop runs
+const uchar LightThreshold = 10;						// (0 - 255) Level above which pixels are considered bright
+const int LightPatchSizeThreshold = 0;					// Total size above which light patches are considered for movement
 const int CameraGuideIdx = 0;							// Index of guide camera
 const int CameraScienceIdx = 1;							// Index of science camera
-const int CameraGuideResolution[2] = {1000, 800};		// (H, V) Resolution of guide camera images (max: 3096, 2080)
-const int CameraGuideFormat[2] = {ASI_IMG_RAW8, 1};		// (type, bin) Format of guide camera images
+const int CameraGuideResolution[2] = {2000, 1600};		// (H, V) Resolution of guide camera images (max: 3096, 2080)
+const int CameraGuideFormat[2] = {ASI_IMG_RAW8, 2};		// (type, bin) Format of guide camera images
 const int CameraScienceResolution[2] = {3840, 2160};	// (H, V) Resolution of science camera images (max: 3840, 2160)
 const int CameraScienceFormat[2] = {ASI_IMG_RAW8, 1};	// (type, bin) Format of science camera images
-const float ExposureTimeGuide = 20;						// (ms) Exposure time of guide camera
-const float ExposureTimeScience = 10;					// (ms) Exposure time of science camera
-const int TargetTolerance = 5;							// Pixel space around image center inside which the target is considered as close
+const float ExposureTimeGuide = 1;						// (ms) Exposure time of guide camera
+const float ExposureTimeScience = 0.6;					// (ms) Exposure time of science camera
+const int GainGuide = 1;
+const int GainScience = 1;
+const int TargetTolerance = 200;							// Pixel space around image center inside which the target is considered as close
 const int CameraSnapTimeout = 100000000;				// (ms) Timeout of cameras taking images
 const int MaxLightPatches = 100000;						// Maximum amount of light patches detectable in one image
-const string GuideImagePrefix = "img_guide_";			// Filename prefix of all saved guide camera images
 const string ScienceImagePrefix = "img_science_";		// Filename prefix of all saved science camera images
-const string GuideImageExt = ".jpg";					// Filename extension of all saved guide camera images
-const string ScienceImageExt = ".jpg";					// Filename extension of all saved science camera images
+const string ImagesExt = ".png";					// Filename extension of all saved science camera images
 const int SerialBaud = 115200;							// Baud rate of serial line to Teensy
 const float CaptureDelay = 0;							// (sec) Delay between each camera capture
 const float GuideLoopDelay = 0;							// (sec) Delay after each guide loop iteration
-const float ScienceLoopDelay = 0;						// (sec) Delay after each science loop iteration
+const float ScienceLoopDelay = 60;						// (sec) Delay after each science loop iteration
 const float SerialDelay = 0.1;
 const float ThreadMonitorDelay = 1;						// (sec) Delay between each thread status print
 const bool UsingCameras = true;							// true: Takes the images from the cameras | false: loads the test images
@@ -62,12 +62,20 @@ const bool SaveDebugImages = true;						// true: saves debug images | false: doe
 
 // DO NOT CHANGE //
 
+IplImage* CVImageMMData;
+IplImage* CVImageMCData;
+long ImageMMSize = CameraGuideResolution[0] * CameraGuideResolution[1] * (1 + (CameraGuideFormat[0] == ASI_IMG_RAW16));
+long ImageMCSize = CameraScienceResolution[0] * CameraScienceResolution[1] * (1 + (CameraScienceFormat[0] == ASI_IMG_RAW16));
+unsigned char* ImageMMBuff = new unsigned char[ImageMMSize];
+unsigned char* ImageMCBuff = new unsigned char[ImageMCSize];
+Mat ImageMMMat;
+Mat ImageMCMat;
+Mat imageMCFinalMat;
 int CurrLightPos[2] = {-666666, -666666};
 int CameraNum = 0;
 int RPSerialChannel = 0;
 int TargetsAcquired = 0;
-int GuideImagesSnapped = 0;
-int ScienceImagesSnapped = 0;
+int ImagesSnapped = 0;
 int GuideThreadStatus = 0;
 int ScienceThreadStatus = 0;
 float GuideThreadTime = 0;
@@ -125,11 +133,13 @@ void HASP23_ThreadScience();
 void HASP23_ThreadSerial();
 LightPatch HASP23_CalculateTarget(Mat* imageMat, int imageHeight, int imageWidth);
 int HASP23_GetSnappedImageCount(string filePrefix);
+bool HASP23_ProcessGuide();
+void HASP23_ProcessScience();
 bool HASP23_CameraMMSnap(unsigned char* imageBuff, int imageSize);
 bool HASP23_CameraMCSnap(unsigned char* imageBuff, int imageSize);
 long HASP23_CameraGetTemp(int cameraIdx);
 void HASP23_CameraClose(int cameraIdx);
-bool HASP23_CameraInit(int cameraIdx, float exposureTime, int imageWidth, int imageHeight, int imageType, int imageBin);
+bool HASP23_CameraInit(int cameraIdx, float exposureTime, int gain, int imageWidth, int imageHeight, int imageType, int imageBin);
 void HASP23_SerialSend(int serialChannel, string message);
 void HASP23_SerialClose(int serialChannel);
 int HASP23_SerialInit();
@@ -148,60 +158,6 @@ int main()
 
 	CameraNum = ASIGetNumOfConnectedCameras();
 
-	if ((UsingCameras) && (CameraNum < 1))
-	{
-		cout << "ERROR: No cameras connected!\n";
-		
-		return 1;
-	}
-
-	GuideImagesSnapped = HASP23_GetSnappedImageCount(GuideImagePrefix);
-
-	// Running guide & science threads
-
-	thread guideThread = thread(HASP23_ThreadGuide);
-	thread serialThread = thread(HASP23_ThreadSerial);
-
-	do
-	{
-		cout << "\nTargets acquired: " + to_string(TargetsAcquired) + "\n";
-		cout << "Guide thread status: " + to_string(GuideThreadStatus) + "\n";
-		cout << "Guide thread time: " + to_string(GuideThreadTime) + " s\n";
-		cout << "Guide images snapped: " + to_string(GuideImagesSnapped) + "\n";
-
-		usleep(ThreadMonitorDelay * 1000000);
-	} 
-	while ((GuideThreadStatus == 0) || (ScienceThreadStatus == 0));
-
-	guideThread.join();
-	serialThread.join();
-
-	// Closing program
-
-	HASP23_SerialClose(RPSerialChannel);
-
-	cout << "\n-- FINAL STATS --\n\tTargets acquired: " + to_string(TargetsAcquired) + "\n";
-	cout << "\tGuide thread status: " + to_string(GuideThreadStatus) + "\n";
-	cout << "\tGuide thread time: " + to_string(GuideThreadTime) + " s\n";
-	cout << "\tGuide images snapped: " + to_string(GuideImagesSnapped) + "\n";
-
-	cout << "\n---- PROGRAM FINISHED ----\n";
-
-	return 0;
-}
-
-int main2()
-{
-	cout << "---- PROGRAM STARTED ----\n\n";
-
-	// Initializing serial channel
-
-	RPSerialChannel = HASP23_SerialInit();
-
-	// Initializing cameras
-
-	CameraNum = ASIGetNumOfConnectedCameras();
-
 	if ((UsingCameras) && (CameraNum <= 1))
 	{
 		cout << "ERROR: Less than 2 cameras connected!\n";
@@ -209,8 +165,28 @@ int main2()
 		return 1;
 	}
 
-	GuideImagesSnapped = HASP23_GetSnappedImageCount(GuideImagePrefix);
-	ScienceImagesSnapped = HASP23_GetSnappedImageCount(ScienceImagePrefix);
+	ImagesSnapped = HASP23_GetSnappedImageCount(ScienceImagePrefix);
+
+	if (UsingCameras)
+	{
+		if (!HASP23_CameraInit(CameraGuideIdx, ExposureTimeGuide, GainGuide, CameraGuideResolution[0], CameraGuideResolution[1], CameraGuideFormat[0], CameraGuideFormat[1]))
+		{
+			cout << "ERROR: MM camera failed to initialize!\n";
+			GuideThreadStatus = 2;
+
+			return 1;
+		}
+		if (!HASP23_CameraInit(CameraScienceIdx, ExposureTimeScience, GainScience, CameraScienceResolution[0], CameraScienceResolution[1], CameraScienceFormat[0], CameraScienceFormat[1]))
+		{
+			cout << "RROR: MC camera failed to initialize!\n";
+			ScienceThreadStatus = 2;
+
+			return 1;
+		}
+
+		CVImageMMData = cvCreateImage(cvSize(CameraGuideResolution[0], CameraGuideResolution[1]), IPL_DEPTH_8U, 1);
+		CVImageMCData = cvCreateImage(cvSize(CameraScienceResolution[0], CameraScienceResolution[1]), IPL_DEPTH_8U, 1);
+	}
 
 	// Running guide & science threads
 
@@ -223,10 +199,9 @@ int main2()
 		cout << "\nTargets acquired: " + to_string(TargetsAcquired) + "\n";
 		cout << "Guide thread status: " + to_string(GuideThreadStatus) + "\n";
 		cout << "Guide thread time: " + to_string(GuideThreadTime) + " s\n";
-		cout << "Guide images snapped: " + to_string(GuideImagesSnapped) + "\n";
 		cout << "Science thread status: " + to_string(ScienceThreadStatus) + "\n";
 		cout << "Science thread time: " + to_string(ScienceThreadTime) + " s\n";
-		cout << "Science images snapped: " + to_string(ScienceImagesSnapped) + "\n";
+		cout << "Images snapped: " + to_string(ImagesSnapped) + "\n";
 
 		usleep(ThreadMonitorDelay * 1000000);
 	} 
@@ -243,10 +218,9 @@ int main2()
 	cout << "\n-- FINAL STATS --\n\tTargets acquired: " + to_string(TargetsAcquired) + "\n";
 	cout << "\tGuide thread status: " + to_string(GuideThreadStatus) + "\n";
 	cout << "\tGuide thread time: " + to_string(GuideThreadTime) + " s\n";
-	cout << "\tGuide images snapped: " + to_string(GuideImagesSnapped) + "\n";
 	cout << "\tScience thread status: " + to_string(ScienceThreadStatus) + "\n";
 	cout << "\tScience thread time: " + to_string(ScienceThreadTime) + " s\n";
-	cout << "\tScience images snapped: " + to_string(ScienceImagesSnapped) + "\n";
+	cout << "\tImages snapped: " + to_string(ImagesSnapped) + "\n";
 
 	cout << "\n---- PROGRAM FINISHED ----\n";
 
@@ -257,149 +231,35 @@ int main2()
 
 void HASP23_ThreadGuide()
 {
-	IplImage* cvImageMMData;
-	//int imageMMWidth;
-	//int imageMMHeight;
-	//int imageMMType;
-	//int imageMMBin;
-
-	if (UsingCameras)
-	{
-		if (!HASP23_CameraInit(CameraGuideIdx, ExposureTimeGuide, CameraGuideResolution[0], CameraGuideResolution[1], CameraGuideFormat[0], CameraGuideFormat[1]))
-		{
-			//cout << "Exiting guide thread...\n";
-			GuideThreadStatus = 2;
-
-			return;
-		}
-
-		/*if (imageMMType == ASI_IMG_RAW16)
-			cvImageMMData = cvCreateImage(cvSize(imageMMWidth, imageMMHeight), IPL_DEPTH_16U, 1);
-		else if (imageMMType == ASI_IMG_RGB24)
-			cvImageMMData = cvCreateImage(cvSize(imageMMWidth, imageMMHeight), IPL_DEPTH_8U, 3);
-		else*/
-		cvImageMMData = cvCreateImage(cvSize(CameraGuideResolution[0], CameraGuideResolution[1]), IPL_DEPTH_8U, 1);
-	}
-	
 	//if (UsingCameras)
 	//	cout << "\nMM sensor temperature: " + to_string(HASP23_CameraGetTemp(CameraGuideIdx)) + " C\n";
 
 	// Main loop of capturing image 
 
-	long imageMMSize = CameraGuideResolution[0] * CameraGuideResolution[1] * (1 + (CameraGuideFormat[0] == ASI_IMG_RAW16));
-	unsigned char* imageMMBuff = new unsigned char[imageMMSize];
+	//cout << "\n-- MAIN LOOP STARTING --\n";
 
-	Mat imageMMMat;
 	bool tracking = false;
 	bool prevTracking = false;
 
-	//cout << "\n-- MAIN LOOP STARTING --\n";
-
-	while (GuideImagesSnapped < GuideLoopRuns)
+	while (ImagesSnapped < LoopRuns)
 	{
 		//cout << "\nStarting loop iteration " + to_string(ImagesSnapped + 1) + "...\n";
 		auto startTime = chrono::high_resolution_clock::now();
 
-		// Take MM image
+		tracking = HASP23_ProcessGuide();
 
-		if ((UsingCameras && HASP23_CameraMMSnap(imageMMBuff, imageMMSize)) || !UsingCameras)
+		if (tracking)
 		{
-			//cout << "Loading guide image...\n";
+			HASP23_ProcessScience();
 
-			if (UsingCameras)
-			{
-				/*if (CameraGuideFormat[0] == ASI_IMG_RAW16)
-				{
-					unsigned short *pCv16bit = (unsigned short*)(cvImageMMData->imageData);
-					unsigned short *pImg16bit = (unsigned short*)imageMMBuff;
-
-					for (int y = 0; y < CameraGuideResolution[1]; y++)
-					{
-						memcpy(pCv16bit, pImg16bit, CameraGuideResolution[0] * 2);
-						pCv16bit += CameraGuideResolution[0];
-						pImg16bit += CameraGuideResolution[0];
-					}
-				}
-				else
-				{*/
-					unsigned char *pCv8bit = (unsigned char*)cvImageMMData->imageData;
-					unsigned char *pImg8bit = (unsigned char*)imageMMBuff;
-
-					for (int y = 0; y < CameraGuideResolution[1]; y++)
-					{
-						memcpy(pCv8bit, pImg8bit, CameraGuideResolution[0]);
-						pCv8bit += CameraGuideResolution[0];
-						pImg8bit += CameraGuideResolution[0];
-					}
-				//}
-
-				imageMMMat = Mat(CameraGuideResolution[1], CameraGuideResolution[0], CameraGuideFormat[0], cvImageMMData->imageData);
-			}
-			else
-			{
-				imageMMMat = imread("debug/test_guide.jpg", 0);
-			}
-
-			//imwrite("images/" + GuideImagePrefix + to_string(GuideImagesSnapped + 1) + GuideImageExt, imageMMMat);
-
-			//cout << "Calculating largest light patch..\n";
-
-			LightPatch largestPatch = HASP23_CalculateTarget(&imageMMMat, CameraGuideResolution[1], CameraGuideResolution[0]);
-			int currPosX = CameraGuideResolution[0] / 2;
-			int currPosY = CameraGuideResolution[1] / 2;
-
-			int lightPosX = -666666;
-			int lightPosY = -666666;
-			tracking = false;
-
-			// If there has been a detected light patch...
-			if ((largestPatch.posX != -1) && (largestPatch.posY != -1))
-			{
-				// If the detected light patch size is greater than the size threshold...
-				if ((largestPatch.sizeX * largestPatch.sizeY) >= LightPatchSizeThreshold)
-				{
-					// If we need to move (if we're outside the tolerance)...
-					if (((largestPatch.posX < (currPosX - TargetTolerance)) || (largestPatch.posX > (currPosX + TargetTolerance))) ||
-						((largestPatch.posY < (currPosY - TargetTolerance)) || (largestPatch.posY > (currPosY + TargetTolerance))))
-					{
-						lightPosX = round(currPosX - largestPatch.posX);
-						lightPosY = round(currPosY - largestPatch.posY);
-
-						tracking = true;
-					}
-				}
-			}
-
-			CurrLightPos[0] = lightPosX;
-			CurrLightPos[1] = lightPosY;
-
-			if (tracking && !prevTracking)
+			if (!prevTracking)
 				TargetsAcquired++;
-
-			prevTracking = tracking;
-
-			//cout << "Saving guide image...\n";
-
-			if (SaveDebugImages && tracking)
-			{
-				for (int y = 0; y < CameraGuideResolution[1]; y++)
-					for (int x = 0; x < CameraGuideResolution[0]; x++)
-						if (x == largestPatch.posX)
-							imageMMMat.at<uchar>(y, x) = ~imageMMMat.at<uchar>(y, x);
-						else if (y == largestPatch.posY)
-							imageMMMat.at<uchar>(y, x) = ~imageMMMat.at<uchar>(y, x);
-
-				imwrite("debug/trg_" + to_string(GuideImagesSnapped + 1) + ".jpg", imageMMMat);
-			}
-				
-			//cvSaveImage("image_" + to_string(ImagesSnapped + 1) + ".jpg", cvImageData);
 		}
 
 		auto endTime = chrono::high_resolution_clock::now();
 		GuideThreadTime = (float)((endTime - startTime) / chrono::milliseconds(1)) / 1000;
 		//cout << "Finished loop iteration #" + to_string(ImagesSnapped + 1) + " (" + to_string(elapsedTime) + " s).\n";
 
-		GuideImagesSnapped++;
 		usleep(GuideLoopDelay * 1000000);
 	}
 
@@ -408,110 +268,35 @@ void HASP23_ThreadGuide()
 	if (UsingCameras)
 		HASP23_CameraClose(CameraGuideIdx);
 
-	cvReleaseImage(&cvImageMMData);
+	cvReleaseImage(&CVImageMMData);
 
-	if (imageMMBuff)
-		delete[] imageMMBuff;
+	if (ImageMMBuff)
+		delete[] ImageMMBuff;
 
 	GuideThreadStatus = 1;
 }
 
 void HASP23_ThreadScience()
 {
-	IplImage* cvImageMCData;
-	//int imageMCWidth;
-	//int imageMCHeight;
-	//int imageMCType;
-	//int imageMCBin;
-
-	if (UsingCameras)
-	{
-		if (!HASP23_CameraInit(CameraScienceIdx, ExposureTimeScience, CameraScienceResolution[0], CameraScienceResolution[1], CameraScienceFormat[0], CameraScienceFormat[1]))
-		{
-			//cout << "Exiting science thread...\n";
-			ScienceThreadStatus = 2;
-
-			return;
-		}
-
-		/*if (imageMCType == ASI_IMG_RAW16)
-			cvImageMCData = cvCreateImage(cvSize(imageMCWidth, imageMCHeight), IPL_DEPTH_16U, 1);
-		else if (imageMCType == ASI_IMG_RGB24)
-			cvImageMCData = cvCreateImage(cvSize(imageMCWidth, imageMCHeight), IPL_DEPTH_8U, 3);
-		else*/
-		cvImageMCData = cvCreateImage(cvSize(CameraScienceResolution[0], CameraScienceResolution[1]), IPL_DEPTH_8U, 1);
-	}
-	
 	//if (UsingCameras)
 	//	cout << "\nMC sensor temperature: " + to_string(HASP23_CameraGetTemp(CameraScienceIdx)) + " C\n";
 
 	// Main loop of capturing image 
 
-	long imageMCSize = CameraScienceResolution[0] * CameraScienceResolution[1] * (1 + (CameraScienceFormat[0] == ASI_IMG_RAW16));
-	unsigned char* imageMCBuff = new unsigned char[imageMCSize];
-
-	Mat imageMCMat;
-	Mat imageMCFinalMat;
-
 	//cout << "\n-- MAIN LOOP STARTING --\n";
 
-	while (ScienceImagesSnapped < ScienceLoopRuns)
+	while (ImagesSnapped < LoopRuns)
 	{
 		//cout << "\nStarting loop iteration " + to_string(ImagesSnapped + 1) + "...\n";
 		auto startTime = chrono::high_resolution_clock::now();
 
-		// Take MC image
-
-		if ((UsingCameras && HASP23_CameraMCSnap(imageMCBuff, imageMCSize)) || !UsingCameras)
-		{
-			//cout << "Loading science image...\n";
-
-			if (UsingCameras)
-			{
-				/*if (CameraScienceFormat[0] == ASI_IMG_RAW16)
-				{
-					unsigned short *pCv16bit = (unsigned short*)(cvImageMCData->imageData);
-					unsigned short *pImg16bit = (unsigned short*)imageMCBuff;
-
-					for (int y = 0; y < CameraScienceResolution[1]; y++)
-					{
-						memcpy(pCv16bit, pImg16bit, CameraScienceResolution[0] * 2);
-						pCv16bit += CameraScienceResolution[0];
-						pImg16bit += CameraScienceResolution[0];
-					}
-				}
-				else
-				{*/
-					unsigned char *pCv8bit = (unsigned char*)cvImageMCData->imageData;
-					unsigned char *pImg8bit = (unsigned char*)imageMCBuff;
-
-					for (int y = 0; y < CameraScienceResolution[1]; y++)
-					{
-						memcpy(pCv8bit, pImg8bit, CameraScienceResolution[0]);
-						pCv8bit += CameraScienceResolution[0];
-						pImg8bit += CameraScienceResolution[0];
-					}
-				//}
-
-				imageMCMat = Mat(CameraScienceResolution[1], CameraScienceResolution[0], CameraScienceFormat[0], cvImageMCData->imageData);
-			}
-			else
-			{
-				imageMCMat = imread("debug/test_science.jpg", 0);
-			}
-
-			//cout << "Saving science image...\n";
-
-			cvtColor(imageMCMat, imageMCFinalMat, COLOR_BayerRG2RGB);
-
-			imwrite("images/" + ScienceImagePrefix + to_string(ScienceImagesSnapped + 1) + ScienceImageExt, imageMCFinalMat);
-		}
+		HASP23_ProcessScience();
 
 		auto endTime = chrono::high_resolution_clock::now();
 		ScienceThreadTime = (float)((endTime - startTime) / chrono::milliseconds(1)) / 1000;
 		//cout << "Finished loop iteration #" + to_string(ImagesSnapped + 1) + " (" + to_string(elapsedTime) + " s).\n";
 
-		ScienceImagesSnapped++;
+		ImagesSnapped++;
 		usleep(ScienceLoopDelay * 1000000);
 	}
 
@@ -520,10 +305,10 @@ void HASP23_ThreadScience()
 	if (UsingCameras)
 		HASP23_CameraClose(CameraScienceIdx);
 
-	cvReleaseImage(&cvImageMCData);
+	cvReleaseImage(&CVImageMCData);
 
-	if (imageMCBuff)
-		delete[] imageMCBuff;
+	if (ImageMCBuff)
+		delete[] ImageMCBuff;
 
 	ScienceThreadStatus = 1;
 }
@@ -542,7 +327,7 @@ void HASP23_ThreadSerial()
 		moveData += ", ";
 		moveData += to_string(TargetsAcquired);
 		moveData += ", ";
-		moveData += to_string(ScienceImagesSnapped + 1);
+		moveData += to_string(ImagesSnapped + 1);
 		moveData += "); ";
 
 		HASP23_SerialSend(RPSerialChannel, moveData);
@@ -558,7 +343,6 @@ LightPatch HASP23_CalculateTarget(Mat* imageMat, const int imageHeight, const in
 	LightPatch lightPatchBuff[MaxLightPatches];
 	int lightPatchNum = 0;
 
-	//static int patchIndices[ImageHeight][ImageWidth];
 	int** patchIndices = new int*[imageHeight];
 
 	for (int y = 0; y < imageHeight; y++)
@@ -753,37 +537,6 @@ LightPatch HASP23_CalculateTarget(Mat* imageMat, const int imageHeight, const in
 		}
 	}
 
-	// Saving debug images
-	/*if (SaveDebugImages)
-	{
-		string trgData = "";
-
-		for (int y = 0; y < imageHeight; y++)
-		{
-			for (int x = 0; x < imageWidth; x++)
-			{
-				int currPatchIdx = patchIndices[y][x];
-				String currPatchIdxStr = to_string(currPatchIdx);
-
-				if (currPatchIdx == -1)
-					currPatchIdxStr = "l";
-
-				for (int i = 0; i < (4 - currPatchIdxStr.length()); i++)
-					currPatchIdxStr += " ";
-
-				trgData += currPatchIdxStr;
-			}
-
-			trgData += "\n";
-		}
-
-		trgData += "\nX: " + to_string(lightPatchBuff[largestPatchIdx].posX) + "\nY: " + to_string(lightPatchBuff[largestPatchIdx].posY);
-
-		ofstream trgFile("debug/trg_" + to_string(ImagesSnapped + 1) + ".txt");
-		trgFile << trgData;
-		trgFile.close();
-	}*/
-
 	for (int y = 0; y < imageHeight; y++)
 		delete[] patchIndices[y];
 
@@ -805,7 +558,7 @@ int HASP23_GetSnappedImageCount(string filePrefix)
 {
 	int maxNum = 0;
 
-	for (const auto &entry: directory_iterator("images/"))
+	for (const auto &entry: directory_iterator(ProgramPath + "images/"))
 	{
 		string fileName = entry.path().filename().string();
 		fileName = fileName.substr(0, fileName.find_last_of("."));
@@ -824,6 +577,121 @@ int HASP23_GetSnappedImageCount(string filePrefix)
 }
 
 // CAMERA FUNCTIONS //
+
+bool HASP23_ProcessGuide()
+{
+	bool tracking = false;
+
+	// Take MM image
+
+	if ((UsingCameras && HASP23_CameraMMSnap(ImageMMBuff, ImageMMSize)) || !UsingCameras)
+	{
+		//cout << "Loading guide image...\n";
+		if (UsingCameras)
+		{
+			unsigned char *pCv8bit = (unsigned char*)CVImageMMData->imageData;
+			unsigned char *pImg8bit = (unsigned char*)ImageMMBuff;
+
+			for (int y = 0; y < CameraGuideResolution[1]; y++)
+			{
+				memcpy(pCv8bit, pImg8bit, CameraGuideResolution[0]);
+				pCv8bit += CameraGuideResolution[0];
+				pImg8bit += CameraGuideResolution[0];
+			}
+
+			ImageMMMat = Mat(CameraGuideResolution[1], CameraGuideResolution[0], CameraGuideFormat[0], CVImageMMData->imageData);
+		}
+		else
+		{
+			ImageMMMat = imread("debug/test_guide" + ImagesExt, 0);
+		}
+		//imwrite(ProgramPath + "images/" + GuideImagePrefix + to_string(GuideImagesSnapped + 1) + GuideImageExt, ImageMMMat);
+
+		//cout << "Calculating largest light patch..\n";
+
+		LightPatch largestPatch = HASP23_CalculateTarget(&ImageMMMat, CameraGuideResolution[1], CameraGuideResolution[0]);
+		int currPosX = CameraGuideResolution[0] / 2;
+		int currPosY = CameraGuideResolution[1] / 2;
+
+		int lightPosX = -666666;
+		int lightPosY = -666666;
+
+		// If there has been a detected light patch...
+		if ((largestPatch.posX != -1) && (largestPatch.posY != -1))
+		{
+			// If the detected light patch size is greater than the size threshold...
+			if ((largestPatch.sizeX * largestPatch.sizeY) >= LightPatchSizeThreshold)
+			{
+				lightPosX = 0;
+				lightPosY = 0;
+
+				// If we need to move (if we're outside the tolerance)...
+				if (((largestPatch.posX < (currPosX - TargetTolerance)) || (largestPatch.posX > (currPosX + TargetTolerance))) ||
+					((largestPatch.posY < (currPosY - TargetTolerance)) || (largestPatch.posY > (currPosY + TargetTolerance))))
+				{
+					lightPosX = round(currPosX - largestPatch.posX);
+					lightPosY = round(currPosY - largestPatch.posY);
+
+					tracking = true;
+				}
+			}
+		}
+
+		CurrLightPos[0] = lightPosX;
+		CurrLightPos[1] = lightPosY;
+
+		//cout << "Saving guide image...\n";
+
+		if (SaveDebugImages && tracking)
+		{
+			for (int y = 0; y < CameraGuideResolution[1]; y++)
+				for (int x = 0; x < CameraGuideResolution[0]; x++)
+					if (x == largestPatch.posX)
+						ImageMMMat.at<uchar>(y, x) = ~ImageMMMat.at<uchar>(y, x);
+					else if (y == largestPatch.posY)
+						ImageMMMat.at<uchar>(y, x) = ~ImageMMMat.at<uchar>(y, x);
+
+			imwrite(ProgramPath + "debug/trg_" + to_string(ImagesSnapped + 1) + ImagesExt, ImageMMMat);
+		}
+	}
+
+	return tracking;
+}
+
+void HASP23_ProcessScience()
+{
+	// Take MC image
+
+	if ((UsingCameras && HASP23_CameraMCSnap(ImageMCBuff, ImageMCSize)) || !UsingCameras)
+	{
+		//cout << "Loading science image...\n";
+
+		if (UsingCameras)
+		{
+			unsigned char *pCv8bit = (unsigned char*)CVImageMCData->imageData;
+			unsigned char *pImg8bit = (unsigned char*)ImageMCBuff;
+
+			for (int y = 0; y < CameraScienceResolution[1]; y++)
+			{
+				memcpy(pCv8bit, pImg8bit, CameraScienceResolution[0]);
+				pCv8bit += CameraScienceResolution[0];
+				pImg8bit += CameraScienceResolution[0];
+			}
+
+			ImageMCMat = Mat(CameraScienceResolution[1], CameraScienceResolution[0], CameraScienceFormat[0], CVImageMCData->imageData);
+		}
+		else
+		{
+			ImageMCMat = imread("debug/test_science" + ImagesExt, 0);
+		}
+
+		//cout << "Saving science image...\n";
+
+		cvtColor(ImageMCMat, imageMCFinalMat, COLOR_BayerRG2RGB);
+
+		imwrite(ProgramPath + "images/" + ScienceImagePrefix + to_string(ImagesSnapped + 1) + ImagesExt, imageMCFinalMat);
+	}
+}
 
 bool HASP23_CameraMMSnap(unsigned char* imageBuff, int imageSize)
 {
@@ -910,7 +778,7 @@ void HASP23_CameraClose(int cameraIdx)
 	ASICloseCamera(cameraIdx);
 }
 
-bool HASP23_CameraInit(int cameraIdx, float exposureTime, int imageWidth, int imageHeight, int imageType, int imageBin)
+bool HASP23_CameraInit(int cameraIdx, float exposureTime, int gain, int imageWidth, int imageHeight, int imageType, int imageBin)
 {
 	ASI_CAMERA_INFO camInfo;
 	
@@ -969,6 +837,9 @@ bool HASP23_CameraInit(int cameraIdx, float exposureTime, int imageWidth, int im
 	ASISetROIFormat(cameraIdx, imageWidth, imageHeight, imageBin, (ASI_IMG_TYPE)(imageType));
 
 	ASISetControlValue(cameraIdx, ASI_EXPOSURE, exposureTime * 1000, ASI_FALSE);
+	ASISetControlValue(cameraIdx, ASI_GAIN, gain, ASI_FALSE);
+	ASISetControlValue(cameraIdx, ASI_GAMMA, 1, ASI_FALSE);
+	ASISetControlValue(cameraIdx, ASI_HIGH_SPEED_MODE, 1, ASI_FALSE);
 	ASISetControlValue(cameraIdx, ASI_BANDWIDTHOVERLOAD, 40, ASI_FALSE);
 
 	return true;
