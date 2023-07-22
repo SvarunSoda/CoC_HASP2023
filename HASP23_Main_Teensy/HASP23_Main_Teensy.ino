@@ -5,7 +5,7 @@
 #include "Arduino.h"
 #include <SD.h>
 
-//#include "TeensyThreads.h"
+#include "TeensyThreads.h"
 
 // GLOBAL VARIABLES //
 
@@ -18,7 +18,7 @@ const int PIN_MotorADir = 27;
 const int PIN_MotorBEna = 32;
 const int PIN_MotorBStep = 31;
 const int PIN_MotorBDir = 30;
-const int PIN_Switch1 = 37;
+const int PIN_Switch1 = 36;
 const int PIN_Switch2 = 35;
 const int PIN_Switch3 = 34;
 const int PIN_Switch4 = 33;
@@ -30,49 +30,53 @@ const int PIN_Therm5 = 15;
 const int PIN_Therm6 = 14;
 const int PIN_SD = BUILTIN_SDCARD;
 
-const int SearchIncV = 5;
-const int MotorAFastStepDelay = 5000;
-const int MotorBFastStepDelay = 5000;
-const int MotorASlowStepDelay = 10000;
-const int MotorBSlowStepDelay = 10000;
+const int SearchIncV = 20;
+const int MotorAFastStepDelay = 1500;
+const int MotorBFastStepDelay = 1500;
+const int MotorASlowStepDelay = 7000;
+const int MotorBSlowStepDelay = 7000;
 const int MotorALimitBackupSteps = 50;
 const int MotorBLimitBackupSteps = 50;
+const int MaxImageRes[2] = {3096, 2080};
+const int MotorATrackSteps = 4;
+const int MotorBTrackSteps = 4;
+const int MotorBTrackRollbackSteps = 2;
 const int SquarePatternIters = 5;
 const int SquarePatternMotorAIncSteps = 4;
 const int SquarePatternMotorBIncSteps = 4;
 const float SquarePatternMoveDelay = 0.1;
+const int TrackFailTimeout = 10;
 const int MotorMaxSteps = 999999999;
 const int ThermResistance = 10000;
-const int TrackFailTimeout = 10;
 const int BaudRateRP = 115200;
 const int BaudRateDownlink = 4800;
 const int RPMessageNum = 4;
 const int RPMessageBuffLen = 50;
 const String DataFileNamePrefix = "HASP23_Data_";
-const int DataFileMaxLines = 1000000;
-const int DataBuffLen = 100;
+const int DataFileMaxLines = 100000;
+const int DataBuffLen = 200;
 const int SwitchReadNum = 20;
-const float LightLostTimeout = 3;
+const int LightLostTimeout = 3;
 const float TrackDelay = 0.1;
-const float MonitorThreadDelay = 0.1;
 const float LoopDelay = 1;
-const float DataSaveDelay = 1;
-const float DownlinkDelay = 5;
+const float DownlinkDelay = 300;
+const float SerialThreadDelay = 0.1;
+const float DownlinkThreadDelay = 0.1;
 
 // DO NOT CHANGE //
 
 int RPValuesBuff[RPMessageNum];
 int TelescopeStatus = 0;
 int CurrSearchDirH = 0;
+int MissedLightMsgs = 0;
 bool NeedsHoming = true;
 File CurrDataFile;
 bool SDOpen = false;
+bool SDFirstSave = false;
 int CurrDataFileLines = DataFileMaxLines;
 int DataFileNum = 0;
-
-uint32_t dataSaveTimer = 0;
-uint32_t downlinkTimer = 0;
-uint32_t LightTimer = 0;
+bool RestartRequired = false;
+int ResetNum = 0;
 
 // MAIN FUNCTIONS //
 
@@ -107,48 +111,24 @@ void setup()
   for (int i = 0; i < RPMessageNum; i++)
     RPValuesBuff[i] = -666666;
 
-  //threads.addThread(HASP23_MonitorThread);
-  //std::thread th1(HASP23_MonitorThread);
-  //th1.detach();
+  if (!SD.begin(PIN_SD))
+  {
+    Serial.println("ERROR: Unable to open SD card!");
+  }
+  else
+  {
+    SDOpen = true;
+    HASP23_GetDataFileNumSD();
+  }
 
-  Serial.println("================================= Telescope initialized. ===================================");
+  threads.addThread(HASP23_SerialThread);
+  threads.addThread(HASP23_DownlinkThread);
+
+  Serial.println("Telescope initialized.");
 }
 
 void loop() 
 {
-  /*int data[RPMessageNum];
-  
-  if (HASP23_CheckIncomingData(data))
-  {
-    int motorADir = 0;
-    int motorBDir = 0;
-
-    if (data[0] > 0)
-      motorADir = 1;
-    if (data[1] > 0)
-      motorBDir = 1;
-
-    HASP23_RunMotorA(abs(data[0]), motorADir, MotorDelay);
-    HASP23_RunMotorB(abs(data[1]), motorBDir, MotorDelay);
-  }*/
-
-  /*HASP23_RunMotorA(400, 0, 1200, false);
-  HASP23_RunMotorA(400, 1, 1200, false);
-  delay(2000);
-  
-  HASP23_RunMotorB(400, 0, 1200, false);
-  HASP23_RunMotorB(400, 1, 1200, false);
-  delay(2000);*/
-
-  //Serial.println(HASP23_ReadSwitch(PIN_Switch1));
-  //Serial.println(HASP23_ReadSwitch(PIN_Switch2));
-
-  //int status = HASP23_RunMotorB(99999, 1, 2000, true, true);
-  //Serial.println(String(status));
-
-  //HASP23_TelescopeSearch();
-  //HASP23_TelescopeHome();
-
   //Serial.print("1: " + String(HASP23_ReadSwitch(PIN_Switch1)));
   //Serial.print(", 2: " + String(HASP23_ReadSwitch(PIN_Switch2)));
   //Serial.print(", 3: " + String(HASP23_ReadSwitch(PIN_Switch3)));
@@ -201,19 +181,32 @@ void HASP23_TelescopeTrack()
   
   // If we passed a light patch, we roll back using slower square pattern...
   bool aimed;
+  int statusV;
+  int statusH;
 
   do
   {
     delay(TrackDelay * 1000);
 
-    Serial.println(String(RPValuesBuff[0]) + "::" + String(RPValuesBuff[1]));
+    //Serial.println(String(RPValuesBuff[0]) + "::" + String(RPValuesBuff[1]));
 
-    HASP23_CheckIncomingData();
+    //HASP23_CheckIncomingData();
     aimed = (RPValuesBuff[0] != -666666) && (RPValuesBuff[1] != -666666);
 
     if (aimed)
     {
-      Serial.println("Staying at light...");
+      Serial.println("Tracking light...");
+
+      int dirH = 0;
+      int dirV = 0;
+
+      if (RPValuesBuff[0] < 0)
+        dirH = 1;
+      if (RPValuesBuff[1] < 0)
+        dirV = 1;
+
+      HASP23_RunMotorB(MotorBTrackSteps, dirH, MotorBSlowStepDelay, true, false);
+      HASP23_RunMotorA(MotorATrackSteps, dirV, MotorASlowStepDelay, true, false);
     }
     else
     {
@@ -221,14 +214,18 @@ void HASP23_TelescopeTrack()
 
       //int dirH = 0;
       //int dirV = 0;
+      int iters = SquarePatternIters;
       int stepsH = SquarePatternMotorBIncSteps;
       int stepsV = SquarePatternMotorAIncSteps;
       int dirH = 0;
       int dirV = 0;
-      int statusV;
-      int statusH;
 
-      for (int i = 0; i < SquarePatternIters; i++)
+      statusH = HASP23_RunMotorB(MotorBTrackRollbackSteps, !CurrSearchDirH, MotorBSlowStepDelay, true, true);
+
+      if (statusH == 2)
+        iters = 0;
+
+      for (int i = 0; i < iters; i++)
       {
         delay(SquarePatternMoveDelay * 1000);
         statusV = HASP23_RunMotorA(stepsV, dirV, MotorASlowStepDelay, true, true);
@@ -308,27 +305,39 @@ void HASP23_TelescopeHome()
 
 // THREAD FUNCTIONS //
 
-void HASP23_MonitorThread()
+void HASP23_SerialThread()
 {
+  while (true)
+  {
+    HASP23_CheckIncomingData();
+    delay(SerialThreadDelay * 1000);
+  }
+}
+
+void HASP23_DownlinkThread()
+{
+  uint32_t downlinkTimer = 0;
+
+  while (true)
+  {
     uint32_t startTime = millis();
 
-    HASP23_CheckIncomingData();
-
-    if ((dataSaveTimer / 1000) >= DataSaveDelay)
+    if (HASP23_CheckReset())
     {
-      //HASP23_SaveDataSD();
-      dataSaveTimer = 0;
+      Serial.println("Restarting...");
+      _reboot_Teensyduino_();
     }
+
     if ((downlinkTimer / 1000) >= DownlinkDelay)
     {
       HASP23_SendDownlink();
       downlinkTimer = 0;
     }
 
-    delay(MonitorThreadDelay * 1000);
+    delay(DownlinkThreadDelay * 1000);
 
-    dataSaveTimer += millis() - startTime;
     downlinkTimer += millis() - startTime;
+  }
 }
 
 // MOTOR FUNCTIONS //
@@ -341,7 +350,7 @@ int HASP23_RunMotorA(int steps, int dir, int delay, bool limitInterrupt, bool ta
 
   for (int i = 0; i < steps; i++)
   {
-    HASP23_CheckIncomingData();
+    HASP23_SaveDataSD();
 
     if (limitInterrupt && (((dir == 0) && HASP23_ReadSwitch(PIN_Switch4)) || ((dir == 1) && HASP23_ReadSwitch(PIN_Switch3))))
     {
@@ -369,7 +378,7 @@ int HASP23_RunMotorB(int steps, int dir, int delay, bool limitInterrupt, bool ta
 
   for (int i = 0; i < steps; i++)
   {
-    HASP23_CheckIncomingData();
+    HASP23_SaveDataSD();
 
     if (limitInterrupt && (((dir == 0) && HASP23_ReadSwitch(PIN_Switch1)) || ((dir == 1) && HASP23_ReadSwitch(PIN_Switch2))))
     {
@@ -426,48 +435,69 @@ float HASP23_ReadTemp(int pin)
 
 void HASP23_SaveDataSD()
 {
-  bool firstSave = false;
-  char buff[DataBuffLen];
-
   if (!SDOpen)
-  {
-    firstSave = true;
+    return;
 
-    if (SD.begin(PIN_SD))
-    {
-      SDOpen = true;
-      HASP23_GetDataFileNumSD();
-    }
-    else
-    {
-      Serial.println("ERROR: Failed to open SD!");
+  String data = "";
+  data += String(((float)millis()) / 1000);
+  data += ", ";
+  data += String(TelescopeStatus);
+  data += ", ";
+  data += String(HASP23_ReadTemp(PIN_Therm1));
+  data += ", ";
+  data += String(HASP23_ReadTemp(PIN_Therm2));
+  data += ", ";
+  data += String(HASP23_ReadTemp(PIN_Therm3));
+  data += ", ";
+  data += String(HASP23_ReadTemp(PIN_Therm4));
+  data += ", ";
+  data += String(HASP23_ReadTemp(PIN_Therm5));
+  data += ", ";
+  data += String(HASP23_ReadTemp(PIN_Therm6));
 
-      return;
-    }
-  }
+  HASP23_WriteFileSD(data);
+}
+
+void HASP23_WriteFileSD(String data)
+{
+  char buff[DataBuffLen];
 
   if (CurrDataFileLines >= DataFileMaxLines)
   {
-    if (!firstSave)
+    if (!SDFirstSave)
       CurrDataFile.close();
+    else
+      SDFirstSave = true;
 
-    String fileName = DataFileNamePrefix + String(++DataFileNum) + ".txt";
-    int nameLen = fileName.length() + 1;
-    fileName.toCharArray(buff, nameLen);
-    buff[nameLen - 1] = '\0';
+    DataFileNum++;
+
+    String fileName = DataFileNamePrefix + String(DataFileNum) + ".txt";
+    fileName.toCharArray(buff, fileName.length() + 1);
+    buff[fileName.length()] = '\0';
+
+    if (SD.exists(buff) == 1)
+        SD.remove(buff);
 
     CurrDataFile = SD.open(buff, FILE_WRITE);
+    CurrDataFile.seek(EOF);
 
     CurrDataFile.write("-------- HASP 2023 - College of the Canyons - DataFile #");
+
     String fileNumStr = String(DataFileNum);
     fileNumStr.toCharArray(buff, fileNumStr.length() + 1);
+    buff[fileNumStr.length()] = '\0';
     CurrDataFile.write(buff);
-    CurrDataFile.write(" --------\n---- () ----\n\n");
+
+    CurrDataFile.write(" --------\n---- (Time (s), Telescope Status, Temp 1 (C), Temp 2 (C), Temp 3 (C), Temp 4 (C), Temp 5 (C), Temp 6 (C)) ----\n\n");
 
     CurrDataFileLines = 0;
   }
 
-  CurrDataFile.write("DATA\n");
+  data += "\n";
+  data.toCharArray(buff, data.length() + 1);
+  buff[data.length()] = '\0';
+  CurrDataFile.write(buff);
+
   CurrDataFileLines++;
 }
 
@@ -485,7 +515,17 @@ int HASP23_GetDataFileNumSD()
 
     if (!entry.isDirectory()) 
     {
-      
+      String fileName = entry.name();
+      int prefixIdx = fileName.indexOf(DataFileNamePrefix);
+      int extIdx = fileName.indexOf(".txt");
+
+      if ((prefixIdx != -1) && (extIdx != -1))
+      {
+        int currNum = fileName.substring(prefixIdx + DataFileNamePrefix.length(), extIdx).toInt();
+
+        if (currNum > maxNum)
+          maxNum = currNum;
+      }
     }
 
     entry.close();
@@ -494,101 +534,149 @@ int HASP23_GetDataFileNumSD()
   return maxNum;
 }
 
-// DOWNLINK FUNCTIONS //
-
-void HASP23_SendDownlink()
-{
-  //Serial.println("downlink sent!");
-}
-
 // SERIAL FUNCTIONS //
 
 bool HASP23_CheckIncomingData()
 {
   //Serial.println("HASP23_CheckIncomingData");
 
-  Serial.println("a");
+  //Serial.println("b");
 
-  if (SerialRP.available() > 0)
+  char messageBuff[RPMessageBuffLen + 1];
+  int i = 0;
+
+  for (i = 0; i < RPMessageBuffLen; i++)
   {
-    Serial.println("b");
+    int recievedByte = SerialRP.read();
 
-    char messageBuff[RPMessageBuffLen + 1];
-    int i = 0;
+    if (recievedByte == -1)
+      break;
 
-    for (i = 0; i < RPMessageBuffLen; i++)
-    {
-      char recievedChar = SerialRP.read();
+    char recievedChar = (char)(recievedByte);
 
-      if (recievedChar == ';')
-        break;
+    if (recievedChar == ';')
+      break;
 
-      messageBuff[i] = recievedChar;
-    }
-
-    Serial.println("c");
-
-    messageBuff[i + 1] = '\0';
-    String message = String(messageBuff);
-
-    //Serial.println("RP message recieved: " + message);
-    
-    int tempData[RPMessageNum];
-    String wordBuff = "";
-    int parsed = 0;
-    bool startOK = false;
-    bool endOK = false;
-
-    for (int i = 0; i < message.length(); i++)
-    {
-      char currChar = message[i];
-
-      if ((currChar == ' ') || (currChar == '\t'))
-      {
-        continue;
-      }
-      else if (currChar == '(')
-      {
-        if (startOK)
-        {
-          startOK = false;
-
-          break;
-        }
-
-        startOK = true;
-
-        continue;
-      }
-      else if ((currChar == ',') || (currChar == ')'))
-      {
-        tempData[parsed++] = wordBuff.toInt();
-        wordBuff = "";
-
-        if (currChar == ')')
-          endOK = true;
-
-        continue;
-      }
-
-      wordBuff += currChar;
-    }
-
-    Serial.println("d");
-
-    if (startOK && endOK && (parsed == RPMessageNum))
-    {
-      for (int i = 0; i < RPMessageNum; i++)
-        RPValuesBuff[i] = tempData[i];
-
-      return true;
-    }
+    messageBuff[i] = recievedChar;
   }
 
-  //Serial.println("No RP message recieved!");
+  //Serial.println("c");
 
-  //for (int i = 0; i < RPMessageNum; i++)
-  //  RPValuesBuff[i] = -666666;
+  if (i == 0)
+  {
+    //Serial.println("No RP message recieved!");
+
+    if (MissedLightMsgs >= LightLostTimeout)
+    {
+      for (int i = 0; i < RPMessageNum; i++)
+        RPValuesBuff[i] = -666666;
+
+      MissedLightMsgs = 0;
+    }
+    else
+    {
+      MissedLightMsgs++;
+    }
+
+    return false;
+  }
+
+  MissedLightMsgs = 0;
+  HASP23_ClearRPSerialBuffer();
+
+  messageBuff[i + 1] = '\0';
+  String message = String(messageBuff);
+
+  //Serial.println("RP message recieved: " + message);
+      
+  int tempData[RPMessageNum];
+  String wordBuff = "";
+  int parsed = 0;
+  bool startOK = false;
+  bool endOK = false;
+
+  for (int i = 0; i < message.length(); i++)
+  {
+    char currChar = message[i];
+
+    if ((currChar == ' ') || (currChar == '\t'))
+    {
+      continue;
+    }
+    else if (currChar == '(')
+    {
+      if (startOK)
+      {
+        startOK = false;
+
+        break;
+      }
+
+      startOK = true;
+
+      continue;
+    }
+    else if ((currChar == ',') || (currChar == ')'))
+    {
+      tempData[parsed++] = wordBuff.toInt();
+      wordBuff = "";
+
+      if (currChar == ')')
+        endOK = true;
+
+      continue;
+    }
+
+    wordBuff += currChar;
+  }
+
+  //Serial.println("d");
+
+  if (startOK && endOK && (parsed == RPMessageNum))
+  {
+    for (int i = 0; i < RPMessageNum; i++)
+      RPValuesBuff[i] = tempData[i];
+
+    return true;
+  }
+
+  return false;
+}
+
+void HASP23_ClearRPSerialBuffer()
+{
+  while (true)
+    if (SerialRP.read() == -1)
+      break;
+}
+
+void HASP23_SendDownlink()
+{
+  SerialDownlink.write('\t');
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm1));
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm2));
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm3));
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm4));
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm5));
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm6));
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm4));
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm5));
+  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm6));
+  SerialDownlink.write('\n');
+}
+
+bool HASP23_CheckReset()
+{
+  char buff[2] = {SerialDownlink.read(), SerialDownlink.read()};
+  
+  if ((buff[0] == 'R') && (buff[1] == 'S'))
+  {
+    while (true)
+      if (SerialDownlink.read() == -1)
+        break;
+
+    return true;
+  }
 
   return false;
 }
