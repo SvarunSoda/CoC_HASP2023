@@ -9,59 +9,56 @@
 
 // GLOBAL VARIABLES //
 
-#define SerialRP Serial2
-#define SerialDownlink Serial6
+#define SerialRP Serial2                          // Teensy serial channel for RP data line
+#define SerialComms Serial6                       // Teensy serial channel for HASP comms (downlink & uplink)
 
-const int PIN_MotorAEna = 29;
-const int PIN_MotorAStep = 28;
-const int PIN_MotorADir = 27;
-const int PIN_MotorBEna = 32;
-const int PIN_MotorBStep = 31;
-const int PIN_MotorBDir = 30;
-const int PIN_Switch1 = 36;
-const int PIN_Switch2 = 35;
-const int PIN_Switch3 = 34;
-const int PIN_Switch4 = 33;
-const int PIN_Therm1 = 19;
-const int PIN_Therm2 = 18;
-const int PIN_Therm3 = 17;
-const int PIN_Therm4 = 16;
-const int PIN_Therm5 = 15;
-const int PIN_Therm6 = 14;
-const int PIN_SD = BUILTIN_SDCARD;
+const int PIN_MotorAEna = 29;                     // Teensy pin for vertical stepper motor enable
+const int PIN_MotorAStep = 28;                    // Teensy pin for vertical stepper motor step
+const int PIN_MotorADir = 27;                     // Teensy pin for vertical stepper motor direction
+const int PIN_MotorBEna = 32;                     // Teensy pin for horizontal stepper motor enable
+const int PIN_MotorBStep = 31;                    // Teensy pin for horizontal stepper motor step
+const int PIN_MotorBDir = 30;                     // Teensy pin for horizontal stepper motor direction
+const int PIN_Switch1 = 36;                       // Teensy pin for limit switch #1
+const int PIN_Switch2 = 35;                       // Teensy pin for limit switch #2
+const int PIN_Switch3 = 34;                       // Teensy pin for limit switch #3
+const int PIN_Switch4 = 33;                       // Teensy pin for limit switch #4
+const int PIN_Therm1 = 19;                        // Teensy pin for thermistor sensor #1
+const int PIN_Therm2 = 18;                        // Teensy pin for thermistor sensor #2
+const int PIN_Therm3 = 17;                        // Teensy pin for thermistor sensor #3
+const int PIN_Therm4 = 16;                        // Teensy pin for thermistor sensor #4
+const int PIN_Therm5 = 15;                        // Teensy pin for thermistor sensor #5
+const int PIN_Therm6 = 14;                        // Teensy pin for thermistor sensor #6
+const int PIN_SD = BUILTIN_SDCARD;                // Teensy pin for SD card
 
-const int SearchIncV = 20;
-const int MotorAFastStepDelay = 1500;
-const int MotorBFastStepDelay = 1500;
-const int MotorASlowStepDelay = 7000;
-const int MotorBSlowStepDelay = 7000;
-const int MotorALimitBackupSteps = 50;
-const int MotorBLimitBackupSteps = 50;
-const int MaxImageRes[2] = {3096, 2080};
-const int MotorATrackSteps = 4;
-const int MotorBTrackSteps = 4;
-const int MotorBTrackRollbackSteps = 2;
-const int SquarePatternIters = 5;
-const int SquarePatternMotorAIncSteps = 4;
-const int SquarePatternMotorBIncSteps = 4;
-const float SquarePatternMoveDelay = 0.1;
-const int TrackFailTimeout = 10;
-const int MotorMaxSteps = 999999999;
-const int ThermResistance = 10000;
-const int BaudRateRP = 115200;
-const int BaudRateDownlink = 4800;
-const int RPMessageNum = 4;
-const int RPMessageBuffLen = 50;
-const String DataFileNamePrefix = "HASP23_Data_";
-const int DataFileMaxLines = 100000;
-const int DataBuffLen = 200;
-const int SwitchReadNum = 20;
-const int LightLostTimeout = 3;
-const float TrackDelay = 0.1;
-const float LoopDelay = 1;
-const float DownlinkDelay = 300;
-const float SerialThreadDelay = 0.1;
-const float DownlinkThreadDelay = 0.1;
+const int SearchIncV = 20;                        // Vertical motor step increment after each wide search sweep
+const int MotorAFastStepDelay = 3000;             // Vertical motor fast step delay
+const int MotorBFastStepDelay = 3000;             // Horizontal motor fast step delay
+const int MotorASlowStepDelay = 8000;             // Vertical motor slow step delay
+const int MotorBSlowStepDelay = 8000;             // Horizontal motor slow step delay
+const int MotorMaxSteps = 999999999;              // Maximum steps for both stepper motors
+const int MotorALimitBackupSteps = 50;            // Vertical motor rollback steps upon reaching a limit switch
+const int MotorBLimitBackupSteps = 50;            // Horizontal motor rollback steps upon reaching a limit switch
+const int MotorATrackSteps = 1;                   // Vertical motor track steps during each tracking iteration
+const int MotorBTrackSteps = 1;                   // Horizontal motor track steps during each tracking iteration
+const int MotorBTrackRollbackSteps = 2;           // Horizontal motor rollback steps after each overshot light detection
+const int SquarePatternIters = 8;                 // Iterations of each performed square search pattern
+const int SquarePatternMotorAIncSteps = 4;        // Vertical motor steps by which each square search pattern is incremented
+const int SquarePatternMotorBIncSteps = 4;        // Horizontal motor steps by which each square search pattern is incremented
+const float SquarePatternMoveDelay = 0.1;         // (sec) Delay after each square search pattern iteration
+const int ThermResistance = 10000;                // Resistance of resistors adjacent to thermistor sensors
+const int BaudRateRP = 115200;                    // Baud rate for RP data serial channel
+const int BaudRateComms = 4800;                   // Baud rate for HASP comms serial channel
+const int RPMessageNum = 4;                       // Number of values in each recieved RP serial data message
+const int RPMessageBuffLen = 50;                  // Buffer length for each recieved RP serial data message
+const String DataFileNamePrefix = "HASP23_Data_"; // Prefix for all data files saved to SD card
+const int DataFileMaxLines = 100000;              // Maximum amount of lines each SD card data file will reach
+const int DataBuffLen = 200;                      // Buffer length for writing to SD card data files
+const int SwitchReadNum = 40;                     // Number of times each limit switch read will be averaged
+const int LightLostTimeout = 3;                   // Number of RP message checks after which the detected light position will be reverted to -666666
+const float LoopDelay = 1;                        // (sec) Delay after each main telescope loop iteration
+const float TrackDelay = 0.1;                     // (sec) Delay before each telescope track loop iteration
+const float DownlinkDelay = 300;                  // (sec) Delay between each downlink message being sent
+const float CommsThreadDelay = 1;                 // (sec) Delay after each downlink & uplink check
 
 // DO NOT CHANGE //
 
@@ -75,8 +72,8 @@ bool SDOpen = false;
 bool SDFirstSave = false;
 int CurrDataFileLines = DataFileMaxLines;
 int DataFileNum = 0;
-bool RestartRequired = false;
-int ResetNum = 0;
+int NewlyRestarted = 1;
+bool CanTrackMove = false;
 
 // MAIN FUNCTIONS //
 
@@ -84,7 +81,7 @@ void setup()
 {
   Serial.begin(9600);
   SerialRP.begin(BaudRateRP);
-  SerialDownlink.begin(BaudRateDownlink);
+  SerialComms.begin(BaudRateComms);
 
   pinMode(PIN_MotorAEna, OUTPUT);
   pinMode(PIN_MotorAStep, OUTPUT);
@@ -121,10 +118,9 @@ void setup()
     HASP23_GetDataFileNumSD();
   }
 
-  threads.addThread(HASP23_SerialThread);
-  threads.addThread(HASP23_DownlinkThread);
+  threads.addThread(HASP23_CommsThread);
 
-  Serial.println("Telescope initialized.");
+  Serial.println("=================== Telescope initialized. ===================");
 }
 
 void loop() 
@@ -190,23 +186,28 @@ void HASP23_TelescopeTrack()
 
     //Serial.println(String(RPValuesBuff[0]) + "::" + String(RPValuesBuff[1]));
 
-    //HASP23_CheckIncomingData();
+    HASP23_CheckIncomingData();
     aimed = (RPValuesBuff[0] != -666666) && (RPValuesBuff[1] != -666666);
 
     if (aimed)
     {
       Serial.println("Tracking light...");
 
-      int dirH = 0;
-      int dirV = 0;
+      if (CanTrackMove)
+      {
+        /*int dirH = 1;
+        int dirV = 1;
 
-      if (RPValuesBuff[0] < 0)
-        dirH = 1;
-      if (RPValuesBuff[1] < 0)
-        dirV = 1;
+        if (RPValuesBuff[0] < 0)
+          dirH = 0;
+        if (RPValuesBuff[1] < 0)
+          dirV = 0;
 
-      HASP23_RunMotorB(MotorBTrackSteps, dirH, MotorBSlowStepDelay, true, false);
-      HASP23_RunMotorA(MotorATrackSteps, dirV, MotorASlowStepDelay, true, false);
+        HASP23_RunMotorB(MotorBTrackSteps, dirH, MotorBSlowStepDelay, true, false);
+        HASP23_RunMotorA(MotorATrackSteps, dirV, MotorASlowStepDelay, true, false);*/
+
+        CanTrackMove = false;
+      }
     }
     else
     {
@@ -220,10 +221,10 @@ void HASP23_TelescopeTrack()
       int dirH = 0;
       int dirV = 0;
 
-      statusH = HASP23_RunMotorB(MotorBTrackRollbackSteps, !CurrSearchDirH, MotorBSlowStepDelay, true, true);
+      /*statusH = HASP23_RunMotorB(MotorBTrackRollbackSteps, !CurrSearchDirH, MotorBSlowStepDelay, true, true);
 
       if (statusH == 2)
-        iters = 0;
+        iters = 0;*/
 
       for (int i = 0; i < iters; i++)
       {
@@ -291,7 +292,7 @@ bool HASP23_TelescopeSearch()
 
 void HASP23_TelescopeHome()
 {
-  //Serial.println("HASP23_TelescopeHome");
+  //println("HASP23_TelescopeHome");
 
   TelescopeStatus = 1;
 
@@ -305,17 +306,10 @@ void HASP23_TelescopeHome()
 
 // THREAD FUNCTIONS //
 
-void HASP23_SerialThread()
+void HASP23_CommsThread()
 {
-  while (true)
-  {
-    HASP23_CheckIncomingData();
-    delay(SerialThreadDelay * 1000);
-  }
-}
+  //Serial.println("HASP23_CommsThread");
 
-void HASP23_DownlinkThread()
-{
   uint32_t downlinkTimer = 0;
 
   while (true)
@@ -334,7 +328,7 @@ void HASP23_DownlinkThread()
       downlinkTimer = 0;
     }
 
-    delay(DownlinkThreadDelay * 1000);
+    delay(CommsThreadDelay * 1000);
 
     downlinkTimer += millis() - startTime;
   }
@@ -350,6 +344,7 @@ int HASP23_RunMotorA(int steps, int dir, int delay, bool limitInterrupt, bool ta
 
   for (int i = 0; i < steps; i++)
   {
+    HASP23_CheckIncomingData();
     HASP23_SaveDataSD();
 
     if (limitInterrupt && (((dir == 0) && HASP23_ReadSwitch(PIN_Switch4)) || ((dir == 1) && HASP23_ReadSwitch(PIN_Switch3))))
@@ -378,6 +373,7 @@ int HASP23_RunMotorB(int steps, int dir, int delay, bool limitInterrupt, bool ta
 
   for (int i = 0; i < steps; i++)
   {
+    HASP23_CheckIncomingData();
     HASP23_SaveDataSD();
 
     if (limitInterrupt && (((dir == 0) && HASP23_ReadSwitch(PIN_Switch1)) || ((dir == 1) && HASP23_ReadSwitch(PIN_Switch2))))
@@ -416,6 +412,8 @@ bool HASP23_ReadSwitch(int pin)
 
 float HASP23_ReadTemp(int pin)
 {
+  //Serial.println("HASP23_ReadTemp");
+
   int Vo;
   float R1 = ThermResistance;
   float logR2, R2, T;
@@ -435,8 +433,7 @@ float HASP23_ReadTemp(int pin)
 
 void HASP23_SaveDataSD()
 {
-  if (!SDOpen)
-    return;
+  //Serial.println("HASP23_SaveDataSD");
 
   String data = "";
   data += String(((float)millis()) / 1000);
@@ -460,6 +457,11 @@ void HASP23_SaveDataSD()
 
 void HASP23_WriteFileSD(String data)
 {
+  //Serial.println("HASP23_WriteFileSD");
+
+  if (!SDOpen)
+    return;
+
   char buff[DataBuffLen];
 
   if (CurrDataFileLines >= DataFileMaxLines)
@@ -503,6 +505,11 @@ void HASP23_WriteFileSD(String data)
 
 int HASP23_GetDataFileNumSD()
 {
+  //Serial.println("HASP23_GetDataFileNumSD");
+
+  if (!SDOpen)
+    return;
+
   int maxNum = 0;
   File root = SD.open("/");
 
@@ -540,7 +547,7 @@ bool HASP23_CheckIncomingData()
 {
   //Serial.println("HASP23_CheckIncomingData");
 
-  //Serial.println("b");
+  //Serial.println("a");
 
   char messageBuff[RPMessageBuffLen + 1];
   int i = 0;
@@ -560,7 +567,7 @@ bool HASP23_CheckIncomingData()
     messageBuff[i] = recievedChar;
   }
 
-  //Serial.println("c");
+  //Serial.println("b");
 
   if (i == 0)
   {
@@ -582,7 +589,14 @@ bool HASP23_CheckIncomingData()
   }
 
   MissedLightMsgs = 0;
-  HASP23_ClearRPSerialBuffer();
+  
+  //Serial.println("c");
+
+  while (true)
+    if (SerialRP.read() == -1)
+      break;
+
+  //Serial.println("d");
 
   messageBuff[i + 1] = '\0';
   String message = String(messageBuff);
@@ -630,49 +644,57 @@ bool HASP23_CheckIncomingData()
     wordBuff += currChar;
   }
 
-  //Serial.println("d");
+  //Serial.println("e");
 
   if (startOK && endOK && (parsed == RPMessageNum))
   {
     for (int i = 0; i < RPMessageNum; i++)
       RPValuesBuff[i] = tempData[i];
 
+    CanTrackMove = true;
+
     return true;
   }
+
+  //Serial.println("f");
 
   return false;
 }
 
-void HASP23_ClearRPSerialBuffer()
-{
-  while (true)
-    if (SerialRP.read() == -1)
-      break;
-}
-
 void HASP23_SendDownlink()
 {
-  SerialDownlink.write('\t');
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm1));
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm2));
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm3));
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm4));
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm5));
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm6));
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm4));
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm5));
-  SerialDownlink.write((uint8_t)HASP23_ReadTemp(PIN_Therm6));
-  SerialDownlink.write('\n');
+  //Serial.println("HASP23_SendDownlink");
+
+  SerialComms.write('\t');
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm1));
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm2));
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm3));
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm4));
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm5));
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm6));
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm4));
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm5));
+  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm6));
+  SerialComms.write(highByte(RPValuesBuff[3]));
+  SerialComms.write(lowByte(RPValuesBuff[3]));
+  SerialComms.write(highByte(RPValuesBuff[2]));
+  SerialComms.write(lowByte(RPValuesBuff[2]));
+  SerialComms.write((int8_t)(NewlyRestarted));
+  SerialComms.write('\n');
+
+  NewlyRestarted = 0;
 }
 
 bool HASP23_CheckReset()
 {
-  char buff[2] = {SerialDownlink.read(), SerialDownlink.read()};
+  //Serial.println("HASP23_CheckReset");
+  
+  char buff[2] = {SerialComms.read(), SerialComms.read()};
   
   if ((buff[0] == 'R') && (buff[1] == 'S'))
   {
     while (true)
-      if (SerialDownlink.read() == -1)
+      if (SerialComms.read() == -1)
         break;
 
     return true;
