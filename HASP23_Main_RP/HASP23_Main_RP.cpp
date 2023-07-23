@@ -36,18 +36,18 @@ const string ProgramPath = "/home/hasp23/Desktop/HASP23_Code_RP/Output/";
 const int LoopRuns = numeric_limits<int>::max();	// How many times the science loop runs
 const uchar LightThreshold = 10;						// (0 - 255) Level above which pixels are considered bright
 const int LightPatchSizeThreshold = 0;					// Total size above which light patches are considered for movement
-const int CameraGuideIdx = 0;							// Index of guide camera
-const int CameraScienceIdx = 1;							// Index of science camera
-const int CameraGuideResolution[2] = {2000, 1600};		// (H, V) Resolution of guide camera images (max: 3096, 2080)
-const int CameraGuideFormat[2] = {ASI_IMG_RAW8, 2};		// (type, bin) Format of guide camera images
+const int CameraGuideIdx = 1;							// Index of guide camera
+const int CameraScienceIdx = 0;							// Index of science camera
+const int CameraGuideResolution[2] = {3096, 2080};		// (H, V) Resolution of guide camera images (max: 3096, 2080)
+const int CameraGuideFormat[2] = {ASI_IMG_RAW8, 1};		// (type, bin) Format of guide camera images
 const int CameraScienceResolution[2] = {3840, 2160};	// (H, V) Resolution of science camera images (max: 3840, 2160)
 const int CameraScienceFormat[2] = {ASI_IMG_RAW8, 1};	// (type, bin) Format of science camera images
 const float ExposureTimeGuide = 1;						// (ms) Exposure time of guide camera
-const float ExposureTimeScience = 0.6;					// (ms) Exposure time of science camera
-const int GainGuide = 1;
-const int GainScience = 1;
+const float ExposureTimeScience = 0.2;					// (ms) Exposure time of science camera
+const int GainGuide = 200;
+const int GainScience = 150;
 const int TargetTolerance = 200;							// Pixel space around image center inside which the target is considered as close
-const int CameraSnapTimeout = 100000000;				// (ms) Timeout of cameras taking images
+const int CameraSnapTimeout = 20000;						//  Timeout iters of cameras taking images
 const int MaxLightPatches = 100000;						// Maximum amount of light patches detectable in one image
 const string ScienceImagePrefix = "img_science_";		// Filename prefix of all saved science camera images
 const string ImagesExt = ".png";					// Filename extension of all saved science camera images
@@ -296,7 +296,6 @@ void HASP23_ThreadScience()
 		ScienceThreadTime = (float)((endTime - startTime) / chrono::milliseconds(1)) / 1000;
 		//cout << "Finished loop iteration #" + to_string(ImagesSnapped + 1) + " (" + to_string(elapsedTime) + " s).\n";
 
-		ImagesSnapped++;
 		usleep(ScienceLoopDelay * 1000000);
 	}
 
@@ -691,6 +690,8 @@ void HASP23_ProcessScience()
 
 		imwrite(ProgramPath + "images/" + ScienceImagePrefix + to_string(ImagesSnapped + 1) + ImagesExt, imageMCFinalMat);
 	}
+
+	ImagesSnapped++;
 }
 
 bool HASP23_CameraMMSnap(unsigned char* imageBuff, int imageSize)
@@ -838,8 +839,8 @@ bool HASP23_CameraInit(int cameraIdx, float exposureTime, int gain, int imageWid
 
 	ASISetControlValue(cameraIdx, ASI_EXPOSURE, exposureTime * 1000, ASI_FALSE);
 	ASISetControlValue(cameraIdx, ASI_GAIN, gain, ASI_FALSE);
-	ASISetControlValue(cameraIdx, ASI_GAMMA, 1, ASI_FALSE);
-	ASISetControlValue(cameraIdx, ASI_HIGH_SPEED_MODE, 1, ASI_FALSE);
+	//ASISetControlValue(cameraIdx, ASI_GAMMA, 1, ASI_FALSE);
+	//ASISetControlValue(cameraIdx, ASI_HIGH_SPEED_MODE, 1, ASI_FALSE);
 	ASISetControlValue(cameraIdx, ASI_BANDWIDTHOVERLOAD, 40, ASI_FALSE);
 
 	return true;
