@@ -5,7 +5,7 @@
 #include "Arduino.h"
 #include <SD.h>
 
-#include "TeensyThreads.h"
+#include <TeensyThreads.h>
 
 // GLOBAL VARIABLES //
 
@@ -58,6 +58,7 @@ const int LightLostTimeout = 3;                   // Number of RP message checks
 const float LoopDelay = 1;                        // (sec) Delay after each main telescope loop iteration
 const float TrackDelay = 0.1;                     // (sec) Delay before each telescope track loop iteration
 const float DownlinkDelay = 300;                  // (sec) Delay between each downlink message being sent
+                                                  //Change Downlink to 300 seconds
 const float CommsThreadDelay = 1;                 // (sec) Delay after each downlink & uplink check
 
 // DO NOT CHANGE //
@@ -125,10 +126,10 @@ void setup()
 
 void loop() 
 {
-  //Serial.print("1: " + String(HASP23_ReadSwitch(PIN_Switch1)));
-  //Serial.print(", 2: " + String(HASP23_ReadSwitch(PIN_Switch2)));
-  //Serial.print(", 3: " + String(HASP23_ReadSwitch(PIN_Switch3)));
-  //Serial.println(", 4: " + String(HASP23_ReadSwitch(PIN_Switch4)));
+  // Serial.print("1: " + String(HASP23_ReadSwitch(PIN_Switch1)));
+  // Serial.print(", 2: " + String(HASP23_ReadSwitch(PIN_Switch2)));
+  // Serial.print(", 3: " + String(HASP23_ReadSwitch(PIN_Switch3)));
+  // Serial.println(", 4: " + String(HASP23_ReadSwitch(PIN_Switch4)));
 
   /*Serial.println("Temp 1: " + String(HASP23_ReadTemp(PIN_Therm1)) + " C.");
   Serial.println("Temp 2: " + String(HASP23_ReadTemp(PIN_Therm2)) + " C.");
@@ -164,7 +165,7 @@ void loop()
     NeedsHoming = true;
   }
 
-  delay(LoopDelay * 1000);
+  delay(LoopDelay * 1000); 
 }
 
 // TELESCOPE FUNCTIONS //
@@ -508,7 +509,7 @@ int HASP23_GetDataFileNumSD()
   //Serial.println("HASP23_GetDataFileNumSD");
 
   if (!SDOpen)
-    return;
+    return 0;
 
   int maxNum = 0;
   File root = SD.open("/");
@@ -524,7 +525,7 @@ int HASP23_GetDataFileNumSD()
     {
       String fileName = entry.name();
       int prefixIdx = fileName.indexOf(DataFileNamePrefix);
-      int extIdx = fileName.indexOf(".txt");
+      int extIdx = fileName.indexOf(".txt");      
 
       if ((prefixIdx != -1) && (extIdx != -1))
       {
@@ -665,23 +666,27 @@ void HASP23_SendDownlink()
 {
   //Serial.println("HASP23_SendDownlink");
 
-  SerialComms.write('\t');
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm1));
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm2));
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm3));
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm4));
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm5));
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm6));
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm4));
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm5));
-  SerialComms.write((int8_t)HASP23_ReadTemp(PIN_Therm6));
-  SerialComms.write(highByte(RPValuesBuff[3]));
-  SerialComms.write(lowByte(RPValuesBuff[3]));
-  SerialComms.write(highByte(RPValuesBuff[2]));
-  SerialComms.write(lowByte(RPValuesBuff[2]));
-  SerialComms.write((int8_t)(NewlyRestarted));
-  SerialComms.write('\n');
-
+  SerialComms.print('s');              //starting symbol
+  SerialComms.print(HASP23_ReadTemp(PIN_Therm1)); //Science camera get rid of the castings, add write print add comma
+  SerialComms.print(',');
+  SerialComms.print(HASP23_ReadTemp(PIN_Therm2)); //PCB
+  SerialComms.print(',');
+  SerialComms.print(HASP23_ReadTemp(PIN_Therm3)); //Guide Camera
+  SerialComms.print(',');
+  SerialComms.print(HASP23_ReadTemp(PIN_Therm4)); //Doesn't work
+  SerialComms.print(',');
+  SerialComms.print(HASP23_ReadTemp(PIN_Therm5));  //Pi
+  SerialComms.print(',');
+  SerialComms.print(HASP23_ReadTemp(PIN_Therm6)); //Outside
+  SerialComms.print(',');
+  SerialComms.print(RPValuesBuff[3]); //Amount of images taken
+  SerialComms.print(',');
+  SerialComms.print(RPValuesBuff[2]); // Is camera seeing sun (i.e.)
+  SerialComms.print(',');
+  SerialComms.print(NewlyRestarted);
+  SerialComms.print(',');
+  SerialComms.println('e');          //ending symbol
+  
   NewlyRestarted = 0;
 }
 
@@ -689,14 +694,14 @@ bool HASP23_CheckReset()
 {
   //Serial.println("HASP23_CheckReset");
   
-  char buff[2] = {SerialComms.read(), SerialComms.read()};
+  int buff[2] = {SerialComms.read(), SerialComms.read()};
   
-  if ((buff[0] == 'R') && (buff[1] == 'S'))
+  if ((buff[0] == 0x53) && (buff[1] == 0x7D))
   {
     while (true)
       if (SerialComms.read() == -1)
+      
         break;
-
     return true;
   }
 
